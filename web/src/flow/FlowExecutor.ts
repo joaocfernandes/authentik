@@ -34,6 +34,7 @@ import { BaseStage, StageHost, SubmitOptions } from "#flow/stages/base";
 import {
     CapabilitiesEnum,
     ChallengeTypes,
+    ChallengeTypesFromJSON,
     ContextualFlowInfo,
     FlowChallengeResponseRequest,
     FlowErrorChallenge,
@@ -185,33 +186,61 @@ export class FlowExecutor
         WebsocketClient.close();
     }
 
-    protected refresh = () => {
+    protected refresh = async () => {
         this.loading = true;
 
-        return new FlowsApi(DEFAULT_CONFIG)
-            .flowsExecutorGet({
+        try {
+            // Check for prefetched flow data from the inline <script data-id="flow-prefetch">
+            // in flow.html. The prefetch fires immediately when HTML is parsed, overlapping
+            // the ~500ms API wait with JS bundle download time and reducing LCP.
+            //
+            // The prefetch stores raw JSON (snake_case fields from the API). We must run it
+            // through ChallengeTypesFromJSON() to get the same camelCase object shape that
+            // FlowsApi.flowsExecutorGet() would return — this is what the rest of the code
+            // expects (e.g. challenge.flowInfo, not challenge.flow_info).
+            const ak = globalAK();
+            const prefetchPromise = ak.flowPrefetch;
+
+            if (prefetchPromise) {
+                // Delete immediately so subsequent stage transitions (which call refresh()
+                // again after a flowsExecutorSolve POST) always make a fresh API call.
+                delete ak.flowPrefetch;
+
+                const rawData = await prefetchPromise;
+
+                if (rawData !== null) {
+                    const challenge = ChallengeTypesFromJSON(rawData);
+                    this.challenge = challenge;
+                    if (this.challenge.flowInfo) {
+                        this.flowInfo = this.challenge.flowInfo;
+                    }
+                    return;
+                }
+                // rawData is null — prefetch failed silently. Fall through to normal fetch.
+            }
+
+            // Normal fetch path — existing behavior, unchanged.
+            const challenge = await new FlowsApi(DEFAULT_CONFIG).flowsExecutorGet({
                 flowSlug: this.flowSlug,
                 query: window.location.search.substring(1),
-            })
-            .then((challenge) => {
-                this.challenge = challenge;
-
-                if (this.challenge.flowInfo) {
-                    this.flowInfo = this.challenge.flowInfo;
-                }
-            })
-            .catch((error) => {
-                const challenge: FlowErrorChallenge = {
-                    component: "ak-stage-flow-error",
-                    error: pluckErrorDetail(error),
-                    requestId: "",
-                };
-
-                this.challenge = challenge as ChallengeTypes;
-            })
-            .finally(() => {
-                this.loading = false;
             });
+
+            this.challenge = challenge;
+
+            if (this.challenge.flowInfo) {
+                this.flowInfo = this.challenge.flowInfo;
+            }
+        } catch (error) {
+            const challenge: FlowErrorChallenge = {
+                component: "ak-stage-flow-error",
+                error: pluckErrorDetail(error),
+                requestId: "",
+            };
+
+            this.challenge = challenge as ChallengeTypes;
+        } finally {
+            this.loading = false;
+        }
     };
 
     public async firstUpdated(changed: PropertyValues<this>): Promise<void> {

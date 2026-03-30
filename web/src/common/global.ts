@@ -17,6 +17,11 @@ export interface GlobalAuthentik {
     flow?: {
         layout: FlowLayoutEnum;
     };
+    // Prefetched flow executor API response (raw JSON, before SDK deserialization).
+    // Set by the inline <script data-id="flow-prefetch"> in flow.html to overlap
+    // the executor API call with JS bundle download time, reducing LCP by ~500ms.
+    // Consumed and deleted by FlowExecutor.ts refresh() on first use.
+    flowPrefetch?: Promise<Record<string, unknown> | null>;
     config: Config;
     brand: CurrentBrand;
     versionFamily: string;
