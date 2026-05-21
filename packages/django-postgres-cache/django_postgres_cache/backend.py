@@ -59,11 +59,12 @@ class DatabaseCache(BaseDatabaseCache):
     def _base_set_expiry(self, timeout: float | None) -> datetime:
         timeout = self.get_backend_timeout(timeout)
         if timeout is None:
-            exp = datetime.max
+            tz = UTC if settings.USE_TZ else None
+            exp = datetime.max.replace(tzinfo=tz)
         else:
             tz = UTC if settings.USE_TZ else None
             exp = datetime.fromtimestamp(timeout, tz=tz)
-        exp.replace(microsecond=0)
+        exp = exp.replace(microsecond=0)
         return exp
 
     def _base_set_data(
